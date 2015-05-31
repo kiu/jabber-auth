@@ -22,11 +22,6 @@ from braveapi.client import API, Permission
 
 log = __import__('logging').getLogger(__name__)
 
-API_ENDPOINT = "http://localhost:8080/api"
-API_IDENTITY = "53bf20d99ce4be153ae19ce6"
-API_PRIVATE = "95c0a1bf354a58316d5e7e76e34be4df81180d8d1318ab6000f91a64496f035f"
-API_PUBLIC = "3c7d8470dd16e5fa39962c87f6dd9446aaabba3cca2170bfee2d3be2ed044ba60649d1c4249bbea28beac3b87441d06f516ffe0503d0c690961d97bd8e34532e"
-
 # Time (in hours) after which a ticket needs to be rechecked
 update_timeout=80
 
@@ -45,22 +40,6 @@ class UTC(tzinfo):
 utc = UTC()
 
 # --------------------------------------------------
-
-def hex2key(hex_key):
-    key_bytes = unhexlify(hex_key)
-    if len(hex_key) == 64:
-        return SigningKey.from_string(key_bytes, curve=NIST256p,
-                hashfunc=sha256)
-    elif len(hex_key) == 128:
-        return VerifyingKey.from_string(key_bytes, curve=NIST256p,
-                hashfunc=sha256)
-    else:
-        raise ValueError("Key in hex form is of the wrong length.")
-
-API_PRIVATE = hex2key(API_PRIVATE)
-API_PUBLIC = hex2key(API_PUBLIC)
-
-# -------------------------------------------------
 
 class PasswordField(BinaryField):
     def __init__(self, difficulty=1, **kwargs):
@@ -303,7 +282,7 @@ class Ticket(Document):
 
         try:
             if (force_update or (datetime.utcnow() - user.updated > timedelta(hours=update_timeout))):
-                api = API(API_ENDPOINT, API_IDENTITY, API_PRIVATE, API_PUBLIC)
+                api = API(config.get('api.endpoint'), config.get('api.identity'), config.get('api.private'), config.get('api.public'))
                 result = api.core.info(identifier)
 
                 log.info("%s", result)
