@@ -3,7 +3,7 @@
 from __future__ import unicode_literals
 
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, tzinfo
 from random import choice, randint
 from string import printable
 from mongoengine import BinaryField
@@ -16,7 +16,8 @@ from binascii import unhexlify
 
 from web.core import config
 from mongoengine import Document, EmbeddedDocument, StringField, DateTimeField, IntField, EmbeddedDocumentField, ListField, BooleanField, ReferenceField
-from braveapi.client import API, Permission
+from brave.api.client import API, Permission
+
 
 
 log = __import__('logging').getLogger(__name__)
@@ -25,6 +26,25 @@ API_ENDPOINT = "http://localhost:8080/api"
 API_IDENTITY = "53bf20d99ce4be153ae19ce6"
 API_PRIVATE = "95c0a1bf354a58316d5e7e76e34be4df81180d8d1318ab6000f91a64496f035f"
 API_PUBLIC = "3c7d8470dd16e5fa39962c87f6dd9446aaabba3cca2170bfee2d3be2ed044ba60649d1c4249bbea28beac3b87441d06f516ffe0503d0c690961d97bd8e34532e"
+
+# Time (in hours) after which a ticket needs to be rechecked
+update_timeout=80
+
+# Timezone Definitions
+ZERO = timedelta(0)
+class UTC(tzinfo):
+    def utcoffset(self, dt):
+        return ZERO
+
+    def tzname(self, dt):
+        return "UTC"
+
+    def dst(self, dt):
+        return ZERO
+
+utc = UTC()
+
+# --------------------------------------------------
 
 def hex2key(hex_key):
     key_bytes = unhexlify(hex_key)
@@ -39,6 +59,8 @@ def hex2key(hex_key):
 
 API_PRIVATE = hex2key(API_PRIVATE)
 API_PUBLIC = hex2key(API_PUBLIC)
+
+# -------------------------------------------------
 
 class PasswordField(BinaryField):
     def __init__(self, difficulty=1, **kwargs):
@@ -118,6 +140,7 @@ class Ticket(Document):
     
     jid_host = StringField(db_field='j')
     bot = BooleanField(db_field='b')
+
     # Used solely by bots
     display_name = StringField(db_field='bs')
     owner = ReferenceField("Ticket", db_field='ow')
@@ -130,7 +153,7 @@ class Ticket(Document):
     @property
     def joinable_mucs(self):
         mucs = Permission.set_has_any_permission(self.tags, 'muc.enter.*')
-        
+
         allowed_mucs = []
         
         if not mucs:
@@ -160,9 +183,13 @@ class Ticket(Document):
         
         char = self.character.name
         
+        #Rename characters
+        #if char == "kiu Nakamura":
+        #    char = "kiu 'ze german' Nakamura"
+
         if self.bot:
             return self.display_name
-    	
+        
         use_corp_ticker = Permission.set_grants_permission(self.tags, 'muc.nick.corp.{0}'.format(muc))
 
         if use_corp_ticker:
@@ -170,7 +197,7 @@ class Ticket(Document):
 
         # Check if the user has a permission granting them access to a rank in this room.
         ranks = Permission.set_has_any_permission(self.tags, 'muc.rank.*.{0}'.format(muc))
-        
+
         # If the user has no ranks for this room specified, check if they have any default ranks
         if not ranks:
             ranks = Permission.set_has_any_permission(self.tags, 'muc.rank.*.{0}'.format('default'))
@@ -253,60 +280,88 @@ class Ticket(Document):
         return "<Ticket {0.id} \"{0.character.name}\">".format(self)
     
     @classmethod
-    def authenticate(cls, identifier, password=None, bot=False):
+    def authenticate(cls, identifier, password=None, bot=False, force_update=True):
         """Validate the given identifier; password is ignored."""
+        
+        user = False
 
         if bot:
-            user = cls.objects(token=identifier, bot=True)
+            user = cls.objects(token=identifier, bot=True).first()
         else:
-            user = cls.objects(token=identifier)
+            try:
+                user = cls.objects(token=identifier).first()
+                log.info("User (%s) found form token %s", user.username, identifier)
+            except Exception:
+                force_update = True
 
         if user:
+            log.info("User Time %s ", user.updated)
             user.updated = user.updated.replace(tzinfo=None)
-
-        if user and datetime.utcnow() - user.updated < timedelta(minutes=1):
+       
+        if user and datetime.utcnow() - user.updated < timedelta(minutes=1) and not (user.bot and user.username == 'pingbot'):
             return user.id, user
 
-        api = API(API_ENDPOINT, API_IDENTITY, API_PRIVATE, API_PUBLIC)
-        result = api.core.info(identifier)
-        
-        # Invalid token sent. Probably a better way to handle this.
-        if not result:
+        try:
+            if (force_update or (datetime.utcnow() - user.updated > timedelta(hours=update_timeout))):
+                api = API(API_ENDPOINT, API_IDENTITY, API_PRIVATE, API_PUBLIC)
+                result = api.core.info(identifier)
+
+                log.info("%s", result)
+
+                # Invalid token sent. Probably a better way to handle this.
+                if not result:
+                    log.info("Token %s not valid, or connection to Core has been lost.", identifier)
+                    return None
+                
+                if user:
+                    user.updated = datetime.utcnow()
+                else:
+                    try:
+                        user = cls.objects(character__name=result.character.name).first()
+                    except:
+                        user = False
+
+                if not user:
+                    user = cls(token=identifier, expires=result.expires, seen=datetime.utcnow())
+                
+                if identifier != user.token:
+                    user.token = identifier
+
+                user.character.id = result.character.id
+                user.character.name = result.character.name
+                # Spaces and ' are invalid for XMPP IDs
+                user.username = result.character.name.replace(" ", "_").replace("'", "").replace("-", "").lower() if not user.username else user.username
+                user.corporation.id = result.corporation.id
+                user.corporation.name = result.corporation.name
+
+                corporation = api.lookup.corporation(result.corporation.id, only='short')
+                if corporation and corporation.success:
+                    user.corporation.ticker = corporation.short
+
+                if result.alliance:
+                    user.alliance.id = result.alliance.id
+                    user.alliance.name = result.alliance.name
+
+                    alliance = api.lookup.alliance(result.alliance.id, only='short')
+                    if alliance and alliance.success:
+                        user.alliance.ticker = alliance.short
+
+                user.tags = [i.replace('jabber.', '') for i in (result.perms if 'perms' in result else [])]
+
+                # Invalid token sent. Probably a better way to handle this.
+#                if bot:
+#                    user = cls.objects(character__id=result.character.id, bot=True).first()
+#                else:
+#                    user = cls.objects(character__id=result.character.id).first()
+
+                user.updated = datetime.utcnow()
+
+        except Exception as e:
             log.info("Token %s not valid, or connection to Core has been lost.", identifier)
             return None
-        
-        if bot:
-            user = cls.objects(character__id=result.character.id, bot=True).first()
-        else:
-            user = cls.objects(character__id=result.character.id).first()
-
-        if not user:
-            user = cls(token=identifier, expires=result.expires, seen=datetime.utcnow())
-        elif identifier != user.token:
-            user.token = identifier
-        
-        user.character.id = result.character.id
-        user.character.name = result.character.name
-        # Spaces and ' are invalid for XMPP IDs
-        user.username = result.character.name.replace(" ", "_").replace("'", "").replace("-", "").lower() if not user.username else user.username
-        user.corporation.id = result.corporation.id
-        user.corporation.name = result.corporation.name
- 
-        corporation = api.lookup.corporation(result.corporation.id, only='short')
-        if corporation and corporation.success:
-            user.corporation.ticker = corporation.short
-       
-        if result.alliance:
-            user.alliance.id = result.alliance.id
-            user.alliance.name = result.alliance.name
-            
-            alliance = api.lookup.alliance(result.alliance.id, only='short')
-            if alliance and alliance.success:
-                user.alliance.ticker = alliance.short
-        
-        user.tags = [i.replace('jabber.', '') for i in (result.perms if 'perms' in result else [])]
 
         if user.bot:
+            user.jid_host = 'bot.bravecollective.com'
             user.updated = datetime.utcnow()
             user.save()
 
@@ -320,16 +375,15 @@ class Ticket(Document):
         else:
             user.jid_host = 'public.bravecollective.com'
         
-        user.updated = datetime.utcnow()
         user.save()
         
         return user.id, user
     
     @classmethod
-    def lookup(cls, identifier):
+    def lookup(self, identifier):
         """Thaw current user data based on session-stored user ID."""
         
-        user = cls.objects(id=identifier).first()
+        user = self.objects(id=identifier).first()
         
         if user:
             user.update(set__seen=datetime.utcnow())
@@ -345,5 +399,6 @@ class Ticket(Document):
         t.display_name = display_name
         t.jid_host = 'bot.bravecollective.com'
         t.bot = True
+        t.updated = datetime.utcnow()
         t.owner = owner
         t.save()
