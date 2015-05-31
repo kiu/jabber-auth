@@ -18,7 +18,7 @@ from scrypt import error as scrypt_error, encrypt as scrypt, decrypt as validate
 from web.core import config
 from mongoengine import Document, EmbeddedDocument, StringField, DateTimeField, IntField, EmbeddedDocumentField, ListField
 from logging import StreamHandler, DEBUG
-from brave.jabber.auth.model import Ticket, API_ENDPOINT, API_IDENTITY, API_PRIVATE, API_PUBLIC
+from brave.jabber.auth.model import Ticket
 
 from ecdsa import SigningKey, VerifyingKey, NIST256p
 from ecdsa.keys import BadSignatureError
@@ -37,7 +37,7 @@ ACCESS_DENIED = "0"
 
 log = __import__('logging').getLogger(__name__)
 
-api = API(API_ENDPOINT, API_IDENTITY, API_PRIVATE, API_PUBLIC)
+api = API(config.get('api.endpoint'), config.get('api.identity'), config.get('api.private'), config.get('api.public'))
 
 def muc_access(username, room):
     server = room.split("@")[1]
