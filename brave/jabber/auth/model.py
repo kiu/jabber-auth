@@ -148,7 +148,13 @@ class Ticket(Document):
                 allowed_mucs.append(muc)
     
         return allowed_mucs
-        
+
+    def server_domain(self):
+        return config.get('jabber.server.domain')
+
+    def server_conference(self):
+        return config.get('jabber.server.conference')
+
     def muc_nickname(self, muc):
         
         # When the room we're joining is not known, show the user's default ranks
@@ -340,20 +346,17 @@ class Ticket(Document):
             return None
 
         if user.bot:
-            user.jid_host = 'bot.bravecollective.com'
+            user.jid_host = config.get('jabber.server.bot') + '.' + config.get('jabber.server.domain')
             user.updated = datetime.utcnow()
             user.save()
 
             return user.id, user
 
         hosts = Permission.set_has_any_permission(user.tags, 'host.*')
-        if hosts and 'host.pokemon.bravecollective.com' in hosts:
-            user.jid_host = 'pokemon.bravecollective.com'
-        elif hosts:
+        if hosts:
             user.jid_host = hosts[0][5:]
         else:
-            user.jid_host = 'public.bravecollective.com'
-        
+            user.jid_host = config.get('jabber.server.public') + '.' + config.get('jabber.server.domain')
         user.save()
         
         return user.id, user
@@ -376,7 +379,7 @@ class Ticket(Document):
         t.username = username
         t.password = password
         t.display_name = display_name
-        t.jid_host = 'bot.bravecollective.com'
+        t.jid_host = config.get('jabber.server.bot') + '.' + config.get('jabber.server.domain')
         t.bot = True
         t.updated = datetime.utcnow()
         t.owner = owner

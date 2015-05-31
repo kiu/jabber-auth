@@ -45,8 +45,7 @@ def muc_access(username, room):
     if '/' in server:
         server = server.split('/')[0]
     
-    # TODO: CONFIG THIS
-    if server != "conference.bravecollective.com" and server != 'bravecollective.com':
+    if server != config.get('jabber.server.conference') + '.' + config.get('jabber.server.domain') and server != config.get('jabber.server.domain'):
         return ACCESS_APPROVED
 
     if room == "chat":
@@ -231,11 +230,14 @@ log.addHandler(hand)
 
 index = 0
 
+port = int(config.get('jabber.auth.port'))
+host = config.get('jabber.auth.host')
+
 sock = socket()
-sock.bind(('127.0.0.1', 12345))
+sock.bind((host, port))
 sock.listen(5)
 
-print "Listening"
+print("Listening on {0}:{1}".format(host, port))
 
 while 1:
     try:
@@ -246,8 +248,9 @@ while 1:
         #conn.send("Hello o/\n")
         method, sep, data = line.partition(":")
         split_data = data.split(":")
-        if not method == 'receive_ping' and not (method == 'muc_access' and split_data[2] == "chat@conference.bravecollective.com" and split_data[0] != "braveineve.com" and split_data[0] != "pleaseignore.com" and split_data[0] != "allies.pleaseignore.com" and split_data[0] != "prosody.pleaseignore.com") and not (method=='muc_roles' and split_data[2] == "chat") and not (method=="muc_nick" and split_data[2] == "chat"):
 
+
+        if not method == 'receive_ping' and not (method == 'muc_access' and split_data[2] == "chat@" + config.get('jabber.server.conference') + '.' + config.get('jabber.server.domain') and split_data[0] != config.get('jabber.server.domain')) and not (method=='muc_roles' and split_data[2] == "chat") and not (method=="muc_nick" and split_data[2] == "chat"):
             t = Ticket.objects(username=split_data[1]).only('jid_host').first()
             if not t:
                 respond("ERROR: User {0} does not exist".format(split_data[1]), conn)

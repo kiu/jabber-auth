@@ -67,7 +67,7 @@
 
     <div class="col-md-6">
         <%self:panel title="Jabber Conference Server" cls="muc-server">
-            <div class="jabber-name">conference.bravecollective.com</div>
+            <div class="jabber-name">${web.user.server_conference()}.${web.user.server_domain()}</div>
         </%self:panel>
     </div>
 </div>
