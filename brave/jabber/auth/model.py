@@ -16,7 +16,7 @@ from binascii import unhexlify
 
 from web.core import config
 from mongoengine import Document, EmbeddedDocument, StringField, DateTimeField, IntField, EmbeddedDocumentField, ListField, BooleanField, ReferenceField
-from brave.api.client import API, Permission
+from braveapi.client import API, Permission
 
 
 log = __import__('logging').getLogger(__name__)

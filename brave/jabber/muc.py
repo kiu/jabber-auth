@@ -3,7 +3,7 @@
 from __future__ import unicode_literals
 
 import sys
-from brave.api.client import API
+from braveapi.client import API
 from web.commands.shell import ShellCommand
 from paste.script.command import Command
 
@@ -25,7 +25,7 @@ from ecdsa.keys import BadSignatureError
 from binascii import unhexlify
 from hashlib import sha256
 
-from brave.api.client import Permission
+from braveapi.client import Permission
 
 import time
 import os
